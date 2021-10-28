@@ -5,7 +5,7 @@ import { Account, Address, toBuffer, keccak256, KECCAK256_NULL, unpadBuffer } fr
 import { encode, decode } from 'rlp'
 import Common from '@ethereumjs/common'
 import { StateManager, StorageDump } from './interface'
-import Cache from './cache'
+import Cache, { getCb, putCb } from './cache'
 import { getActivePrecompiles, ripemdPrecompileAddress } from '../evm/precompiles'
 import { short } from '../evm/opcodes'
 import { AccessList, AccessListItem } from '@ethereumjs/tx'
@@ -70,7 +70,21 @@ export default class DefaultStateManager extends BaseStateManager implements Sta
 
     this._trie = opts.trie ?? new Trie()
     this._storageTries = {}
-    this._cache = new Cache(this._trie)
+
+    const getCb: getCb = async (address) => {
+      const rlp = await this._trie.get(address.buf)
+      return rlp ? Account.fromRlpSerializedAccount(rlp) : undefined
+    }
+    const putCb: putCb = async (keyBuf, accountRlp) => {
+      const trie = this._trie
+      await trie.put(keyBuf, accountRlp)
+    }
+    const deleteCb = async (keyBuf: Buffer) => {
+      const trie = this._trie
+      await trie.del(keyBuf)
+    }
+
+    this._cache = new Cache({ getCb, putCb, deleteCb })
     this._touched = new Set()
     this._touchedStack = []
     this._checkpointCount = 0
@@ -600,7 +614,7 @@ export default class DefaultStateManager extends BaseStateManager implements Sta
     if (account && !(account as any).virtual && !this._cache.keyIsDeleted(address)) {
       return true
     }
-    if (await this._cache._trie.get(address.buf)) {
+    if (await this._trie.get(address.buf)) {
       return true
     }
     return false
